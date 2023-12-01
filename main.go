@@ -19,7 +19,8 @@ type WorkerResult struct {
 func main() {
 	// TODO: consider othre requests than GET
 	workers := flag.Int("w", 1, "number of concurrent workers")
-	requests := flag.Int("r", 1, "number of requests per workre")
+	requests := flag.Int("r", 1, "number of requests per worker")
+	verbose := flag.Bool("v", false, "verbose output (errors)")
 	flag.Parse()
 	if len(flag.Args()) < 1 {
 		fmt.Fprintln(os.Stderr, "missing URL")
@@ -34,7 +35,7 @@ func main() {
 		os.Exit(1)
 	}
 	url := flag.Args()[0]
-	results := perform(url, *workers, *requests)
+	results := perform(url, *workers, *requests, *verbose)
 	fmt.Println(overallMean(results))
 }
 
@@ -50,7 +51,7 @@ func overallMean(results map[int][]WorkerResult) time.Duration {
 	return duration / time.Duration(i)
 }
 
-func perform(url string, workers, requests int) map[int][]WorkerResult {
+func perform(url string, workers, requests int, verbose bool) map[int][]WorkerResult {
 	var wg sync.WaitGroup
 	overall := make(map[int][]WorkerResult)
 	overallChan := make(chan map[int][]WorkerResult)
@@ -71,7 +72,7 @@ func perform(url string, workers, requests int) map[int][]WorkerResult {
 		for r := 0; r < requests; r++ {
 			wg.Add(1)
 			go func(ch chan WorkerResult, id int) {
-				ch <- request(url, id)
+				ch <- request(url, id, verbose)
 				wg.Done()
 			}(resultChan, w)
 		}
@@ -81,14 +82,20 @@ func perform(url string, workers, requests int) map[int][]WorkerResult {
 	return <-overallChan
 }
 
-func request(url string, workerID int) WorkerResult {
+func request(url string, workerID int, verbose bool) WorkerResult {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "create request for %s: %v", url, err)
+		}
 		return WorkerResult{err, 0.0, 0, workerID}
 	}
 	start := time.Now()
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "perform request for %s: %v", url, err)
+		}
 		return WorkerResult{err, time.Since(start), 0, workerID}
 	}
 	defer res.Body.Close()
