@@ -18,7 +18,7 @@ type WorkerResult struct {
 
 func main() {
 	// TODO: consider othre requests than GET
-	workers := flag.Int("n", 1, "number of concurrent workers")
+	workers := flag.Int("w", 1, "number of concurrent workers")
 	requests := flag.Int("r", 1, "number of requests per workre")
 	flag.Parse()
 	if len(flag.Args()) < 1 {
@@ -35,7 +35,19 @@ func main() {
 	}
 	url := flag.Args()[0]
 	results := perform(url, *workers, *requests)
-	fmt.Println(results)
+	fmt.Println(overallMean(results))
+}
+
+func overallMean(results map[int][]WorkerResult) time.Duration {
+	var duration time.Duration
+	var i int
+	for _, rs := range results {
+		for _, r := range rs {
+			duration += r.Time
+			i++
+		}
+	}
+	return duration / time.Duration(i)
 }
 
 func perform(url string, workers, requests int) map[int][]WorkerResult {
@@ -81,5 +93,4 @@ func request(url string, workerID int) WorkerResult {
 	}
 	defer res.Body.Close()
 	return WorkerResult{nil, time.Since(start), res.StatusCode, workerID}
-
 }
