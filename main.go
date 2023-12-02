@@ -10,18 +10,19 @@ import (
 )
 
 type WorkerResult struct {
-	Err      error
+	OK       bool
 	Time     time.Duration
-	Status   int
 	WorkerID int
 }
 
+type Results map[int][]WorkerResult
+
 func main() {
-	// TODO: consider othre requests than GET
 	workers := flag.Int("w", 1, "number of concurrent workers")
 	requests := flag.Int("r", 1, "number of requests per worker")
-	verbose := flag.Bool("v", false, "verbose output (errors)")
+	state := flag.Int("s", http.StatusOK, "response state considered success")
 	flag.Parse()
+
 	if len(flag.Args()) < 1 {
 		fmt.Fprintln(os.Stderr, "missing URL")
 		os.Exit(1)
@@ -34,70 +35,82 @@ func main() {
 		fmt.Fprintln(os.Stderr, "must perform at least one request")
 		os.Exit(1)
 	}
-	url := flag.Args()[0]
-	results := perform(url, *workers, *requests, *verbose)
-	fmt.Println(overallMean(results))
+
+	results := run(flag.Args()[0], *workers, *requests, *state)
+
+	nGood, nBad, duration := stats(results)
+	nTotal := *workers * *requests
+	fmt.Printf("%15s %10s %10s %10s\n", "mean time", "requests", "passed", "failed")
+	fmt.Printf("%15s %10d %10d %10d\n", duration, nTotal, nGood, nBad)
 }
 
-func overallMean(results map[int][]WorkerResult) time.Duration {
-	var duration time.Duration
-	var i int
-	for _, rs := range results {
-		for _, r := range rs {
-			duration += r.Time
-			i++
-		}
-	}
-	return duration / time.Duration(i)
-}
-
-func perform(url string, workers, requests int, verbose bool) map[int][]WorkerResult {
+func run(url string, workers, requests, okState int) Results {
 	var wg sync.WaitGroup
-	overall := make(map[int][]WorkerResult)
-	overallChan := make(chan map[int][]WorkerResult)
-	resultChan := make(chan WorkerResult)
-	go func() {
-		for result := range resultChan {
-			if existing, ok := overall[result.WorkerID]; ok {
-				overall[result.WorkerID] = append(existing, result)
-			} else {
-				workerResults := make([]WorkerResult, 1)
-				workerResults[0] = result
-				overall[result.WorkerID] = workerResults
-			}
-		}
-		overallChan <- overall
-	}()
+	overall := make(chan Results)
+	results := make(chan WorkerResult)
+
+	go collect(overall, results)
+
 	for w := 0; w < workers; w++ {
 		for r := 0; r < requests; r++ {
 			wg.Add(1)
 			go func(ch chan WorkerResult, id int) {
-				ch <- request(url, id, verbose)
+				ch <- get(url, okState, w)
 				wg.Done()
-			}(resultChan, w)
+			}(results, w)
 		}
 	}
 	wg.Wait()
-	close(resultChan)
-	return <-overallChan
+	close(results)
+
+	return <-overall
 }
 
-func request(url string, workerID int, verbose bool) WorkerResult {
+func collect(whole chan<- Results, parts <-chan WorkerResult) {
+	overall := make(Results)
+	for result := range parts {
+		if existing, ok := overall[result.WorkerID]; ok {
+			overall[result.WorkerID] = append(existing, result)
+		} else {
+			workerResults := make([]WorkerResult, 1)
+			workerResults[0] = result
+			overall[result.WorkerID] = workerResults
+		}
+	}
+	whole <- overall
+}
+
+func get(url string, okState, workerID int) WorkerResult {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
-		if verbose {
-			fmt.Fprintf(os.Stderr, "create request for %s: %v", url, err)
-		}
-		return WorkerResult{err, 0.0, 0, workerID}
+		fmt.Fprintf(os.Stderr, "create request for %s: %v", url, err)
+		return WorkerResult{false, 0.0, workerID}
 	}
 	start := time.Now()
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		if verbose {
-			fmt.Fprintf(os.Stderr, "perform request for %s: %v", url, err)
-		}
-		return WorkerResult{err, time.Since(start), 0, workerID}
+		fmt.Fprintf(os.Stderr, "perform request for %s: %v", url, err)
+		return WorkerResult{false, time.Since(start), workerID}
 	}
 	defer res.Body.Close()
-	return WorkerResult{nil, time.Since(start), res.StatusCode, workerID}
+	return WorkerResult{res.StatusCode == okState, time.Since(start), workerID}
+}
+
+func stats(results Results) (int, int, time.Duration) {
+	var mean, duration time.Duration
+	var ok, nok int
+	for _, rs := range results {
+		for _, r := range rs {
+			if r.OK {
+				duration += r.Time
+				ok++
+			} else {
+				nok++
+			}
+		}
+	}
+	if ok > 0 {
+		mean = duration / time.Duration(ok)
+	}
+	return ok, nok, mean
 }
