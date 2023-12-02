@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"sort"
@@ -16,16 +17,14 @@ type WorkerResult struct {
 	WorkerID int
 }
 
-type Results map[int][]WorkerResult
+var Percentiles = []int{0, 25, 50, 75, 100}
 
 type Stats struct {
 	Total  int
 	Passed int
 	Failed int
 	Mean   time.Duration
-	Perc25 time.Duration
-	Perc50 time.Duration
-	Perc75 time.Duration
+	Percs  map[int]time.Duration
 }
 
 func main() {
@@ -50,20 +49,27 @@ func main() {
 	results := run(flag.Args()[0], *workers, *requests, *state)
 
 	s := stats(results)
-	nTotal := *workers * *requests
-	fmt.Printf("%12s %12s %12s %12s %10s %10s %10s\n",
-		"mean", "25%", "50%", "75%", "requests", "passed", "failed")
-	fmt.Printf("%12s %12s %12s %12s %10d %10d %10d\n",
-		s.Mean, s.Perc25, s.Perc50, s.Perc75, nTotal, s.Passed, s.Failed)
+	fmt.Println("Requests:")
+	fmt.Printf("%15s %15s %15s %15s\n", "Total", "Passed", "Failed", "Mean")
+	fmt.Printf("%15d %15d %15d %15s\n", s.Total, s.Passed, s.Failed, s.Mean)
+	fmt.Println("Percentiles:")
+	for _, k := range Percentiles {
+		fmt.Printf("%14d%% ", k)
+	}
+	fmt.Println()
+	for _, k := range Percentiles {
+		fmt.Printf("%15s ", s.Percs[k])
+	}
+	fmt.Println()
 }
 
-func run(url string, workers, requests, okState int) Results {
-	var wg sync.WaitGroup
-	overall := make(chan Results)
+func run(url string, workers, requests, okState int) []WorkerResult {
+	overall := make(chan []WorkerResult)
 	results := make(chan WorkerResult)
 
 	go collect(overall, results)
 
+	var wg sync.WaitGroup
 	for w := 0; w < workers; w++ {
 		for r := 0; r < requests; r++ {
 			wg.Add(1)
@@ -79,16 +85,10 @@ func run(url string, workers, requests, okState int) Results {
 	return <-overall
 }
 
-func collect(whole chan<- Results, parts <-chan WorkerResult) {
-	overall := make(Results)
+func collect(whole chan<- []WorkerResult, parts <-chan WorkerResult) {
+	overall := make([]WorkerResult, 0)
 	for result := range parts {
-		if existing, ok := overall[result.WorkerID]; ok {
-			overall[result.WorkerID] = append(existing, result)
-		} else {
-			workerResults := make([]WorkerResult, 1)
-			workerResults[0] = result
-			overall[result.WorkerID] = workerResults
-		}
+		overall = append(overall, result)
 	}
 	whole <- overall
 }
@@ -99,6 +99,7 @@ func get(url string, okState, workerID int) WorkerResult {
 		fmt.Fprintf(os.Stderr, "create request for %s: %v", url, err)
 		return WorkerResult{false, 0.0, workerID}
 	}
+
 	start := time.Now()
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -106,35 +107,42 @@ func get(url string, okState, workerID int) WorkerResult {
 		return WorkerResult{false, time.Since(start), workerID}
 	}
 	defer res.Body.Close()
+
 	return WorkerResult{res.StatusCode == okState, time.Since(start), workerID}
 }
 
-func stats(results Results) Stats {
+func stats(results []WorkerResult) Stats {
 	var total time.Duration
 	var stats Stats
 	var durations []time.Duration
-	var ok, nok int
-	for _, rs := range results {
-		for _, r := range rs {
-			if r.OK {
-				durations = append(durations, r.Time)
-				total += r.Time
-				ok++
-			} else {
-				nok++
-			}
+	var ok int
+
+	for _, r := range results {
+		if r.OK {
+			durations = append(durations, r.Time)
+			total += r.Time
+			ok++
 		}
 	}
-	stats.Total = ok + nok
+
+	stats.Total = len(results)
 	stats.Passed = ok
-	stats.Failed = nok
+	stats.Failed = stats.Total - stats.Passed
 	if ok > 0 {
 		stats.Mean = total / time.Duration(ok)
 		sort.Slice(durations, func(l, r int) bool { return l < r })
 		n := len(durations) / 2
-		stats.Perc25 = durations[n/4]
-		stats.Perc50 = durations[n/2]
-		stats.Perc75 = durations[n/4*3]
+		stats.Percs = make(map[int]time.Duration)
+		for _, p := range Percentiles {
+			if p == 0 {
+				stats.Percs[p] = durations[0]
+			} else {
+				ratio := float64(p) / 100.0
+				index := int(math.Round(float64(n) * ratio))
+				stats.Percs[p] = durations[index]
+			}
+		}
 	}
+
 	return stats
 }
