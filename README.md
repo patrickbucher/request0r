@@ -6,7 +6,7 @@ Requests an URL concurrently and reports statistics.
 
 Request URL `https://go.dev/` with `3` workers, performing `5` requests each (15 requests):
 
-    $ go run main.go -w 5 -r 20 https://go.dev/
+    $ go run main.go -w 5 -r 5 https://go.dev/
     Requests:
               Total          Passed          Failed            Mean
                  15              15               0    918.857647ms
