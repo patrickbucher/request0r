@@ -63,10 +63,10 @@ func main() {
 }
 
 func run(url string, workers, requests, okState int) []WorkerResult {
-	overall := make(chan []WorkerResult)
+	collector := make(chan []WorkerResult)
 	results := make(chan WorkerResult)
 
-	go collect(overall, results)
+	go collect(collector, results)
 
 	var wg sync.WaitGroup
 	for w := 0; w < workers; w++ {
@@ -81,7 +81,7 @@ func run(url string, workers, requests, okState int) []WorkerResult {
 	wg.Wait()
 	close(results)
 
-	return <-overall
+	return <-collector
 }
 
 func collect(whole chan<- []WorkerResult, parts <-chan WorkerResult) {
@@ -129,7 +129,9 @@ func stats(results []WorkerResult) Stats {
 	stats.Failed = stats.Total - stats.Passed
 	if ok > 0 {
 		stats.Mean = total / time.Duration(ok)
-		sort.Slice(durations, func(l, r int) bool { return l < r })
+		sort.Slice(durations, func(l, r int) bool {
+			return durations[l] < durations[r]
+		})
 		n := len(durations) / 2
 		stats.Percs = make(map[int]time.Duration)
 		for _, p := range Percentiles {

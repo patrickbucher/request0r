@@ -9,7 +9,7 @@ Request URL `https://go.dev/` with `3` workers, performing `5` requests each (15
     $ go run main.go -w 5 -r 5 https://go.dev/
     Requests:
               Total          Passed          Failed            Mean
-                 15              15               0    918.857647ms
+                 25              25               0    311.920786ms
     Percentiles:
-                 0%             25%             50%             75%            100% 
-       883.396304ms    908.858273ms    915.573547ms    918.764777ms    922.190016ms
+                 0%             25%             50%             75%            100%
+       156.408004ms    162.548377ms    168.005046ms    177.479443ms    180.391166ms
