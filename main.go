@@ -12,9 +12,8 @@ import (
 )
 
 type WorkerResult struct {
-	OK       bool
-	Time     time.Duration
-	WorkerID int
+	OK   bool
+	Time time.Duration
 }
 
 var Percentiles = []int{0, 25, 50, 75, 100}
@@ -71,13 +70,13 @@ func run(url string, workers, requests, okState int) []WorkerResult {
 
 	var wg sync.WaitGroup
 	for w := 0; w < workers; w++ {
-		for r := 0; r < requests; r++ {
-			wg.Add(1)
-			go func(ch chan WorkerResult, id int) {
+		wg.Add(requests)
+		go func(ch chan WorkerResult, id int) {
+			for r := 0; r < requests; r++ {
 				ch <- get(url, okState, w)
 				wg.Done()
-			}(results, w)
-		}
+			}
+		}(results, w)
 	}
 	wg.Wait()
 	close(results)
@@ -97,18 +96,18 @@ func get(url string, okState, workerID int) WorkerResult {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create request for %s: %v", url, err)
-		return WorkerResult{false, 0.0, workerID}
+		return WorkerResult{false, 0.0}
 	}
 
 	start := time.Now()
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "perform request for %s: %v", url, err)
-		return WorkerResult{false, time.Since(start), workerID}
+		return WorkerResult{false, time.Since(start)}
 	}
 	defer res.Body.Close()
 
-	return WorkerResult{res.StatusCode == okState, time.Since(start), workerID}
+	return WorkerResult{res.StatusCode == okState, time.Since(start)}
 }
 
 func stats(results []WorkerResult) Stats {
