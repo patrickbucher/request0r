@@ -132,14 +132,14 @@ func stats(results []WorkerResult) Stats {
 		sort.Slice(durations, func(l, r int) bool {
 			return durations[l] < durations[r]
 		})
-		n := len(durations) / 2
+		n := len(durations)
 		stats.Percs = make(map[int]time.Duration)
 		for _, p := range Percentiles {
 			if p == 0 {
 				stats.Percs[p] = durations[0]
 			} else {
 				ratio := float64(p) / 100.0
-				index := int(math.Round(float64(n) * ratio))
+				index := int(math.Round(float64(n-1) * ratio))
 				stats.Percs[p] = durations[index]
 			}
 		}
